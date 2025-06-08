@@ -1,0 +1,68 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: recipes-spark-submit-job
+  namespace: argo
+spec:
+  serviceAccount: default
+  namespace: argo
+  arguments: {}
+  entrypoint: recipes-spark-submit-job
+  templates:
+    - name: recipes-spark-submit-job
+      steps:
+        - - name: delete-existing-job
+            template: delete-spark-app
+        - - name: create-new-job
+            template: create-spark-app
+    - name: delete-spark-app
+      resource:
+        action: delete
+        manifest: |
+          apiVersion: sparkoperator.k8s.io/v1beta2
+          kind: SparkApplication
+          metadata:
+            name: recipes-spark-job
+            namespace: argo
+    - name: create-spark-app
+      container:
+        securityContext:
+          runAsUser: 0
+        command: [
+            "/bin/sh",
+            "-c",
+            "/opt/spark/bin/spark-submit \
+            --master k8s://https://kubernetes.default.svc \
+            --deploy-mode cluster \
+            --name recipes-spark-submit-job \
+            --conf spark.kubernetes.namespace=argo \
+            --conf spark.kubernetes.container.image=carlosalvgom/recipes-spark:latest \
+            --conf spark.kubernetes.container.image.pullPolicy=Always \
+            --conf spark.executor.memory=32G \
+            --conf spark.executor.cores=4 \
+            --conf spark.executor.instances=5 \
+            --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+            --conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider \
+            --conf spark.kubernetes.driverEnv.AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+            --conf spark.kubernetes.driverEnv.AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+            --conf spark.kubernetes.executorEnv.AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+            --conf spark.kubernetes.executorEnv.AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+            --conf spark.hadoop.fs.s3a.endpoint=s3.amazonaws.com \
+            --conf spark.driver.extraClassPath=/opt/hadoop/lib/* \
+            --conf spark.executor.extraClassPath=/opt/hadoop/lib/* \
+            local:///app/create_dataset.py",
+          ]
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: aws-credentials
+                key: aws-access-key-id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: aws-credentials
+                key: aws-secret-access-key
+        image: apache/spark:3.5.6-python3
+        imagePullPolicy: Always
+        resources: {}
